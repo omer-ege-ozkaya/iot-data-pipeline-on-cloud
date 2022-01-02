@@ -1,5 +1,6 @@
 export PROJECT_ID=$(gcloud config list --format "value(core.project)")
 export MY_REGION=us-central1
+source venv/bin/activate
 
 function start-iot-json-generator() {
   python cloudiot_mqtt_example_json.py \

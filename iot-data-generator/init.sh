@@ -25,3 +25,5 @@ function start-iot-generator() {
      --algorithm=RS256
 }
 
+printf '\nUse "start-iot-json-generator" or "start-iot-generator" commands with argument "1" or "2" as the sensor id.'
+printf '\nExample: "start-iot-json-generator 1"\n\n'

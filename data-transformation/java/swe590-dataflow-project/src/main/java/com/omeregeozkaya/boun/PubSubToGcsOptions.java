@@ -14,7 +14,7 @@ public interface PubSubToGcsOptions extends PipelineOptions, StreamingOptions {
 
     void setInputTopic(String value);
 
-    @Description("Output file's window size in number of minutes.")
+    @Description("Output file's window size in number of seconds.")
     @Default.Integer(1)
     Integer getWindowSize();
 
@@ -24,5 +24,5 @@ public interface PubSubToGcsOptions extends PipelineOptions, StreamingOptions {
     @Validation.Required
     String getOutput();
 
-    void setOutput();
+    void setOutput(String value);
 }

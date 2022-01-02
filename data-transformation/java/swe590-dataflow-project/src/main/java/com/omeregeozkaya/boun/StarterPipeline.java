@@ -80,7 +80,7 @@ public class StarterPipeline {
 
     pipeline
         .apply("Read PubSub Messages", PubsubIO.readStrings().fromTopic(options.getInputTopic()))
-        .apply(Window.into(FixedWindows.of(Duration.standardMinutes(options.getWindowSize()))))
+        .apply(Window.into(FixedWindows.of(Duration.standardSeconds(options.getWindowSize()))))
         .apply("Write files to GCS", new WriteOneFilePerWindow(options.getOutput(), numShards));
 
     pipeline.run().waitUntilFinish();

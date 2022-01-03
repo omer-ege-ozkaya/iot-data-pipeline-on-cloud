@@ -83,7 +83,7 @@ def on_disconnect(unused_client, unused_userdata, rc):
 
 def on_publish(unused_client, unused_userdata, unused_mid):
     """Paho callback when a message is sent to the broker."""
-    print('on_publish')
+    # print('on_publish')
 
 
 def parse_command_line_args():

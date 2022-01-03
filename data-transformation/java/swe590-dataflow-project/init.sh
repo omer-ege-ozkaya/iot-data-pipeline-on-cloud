@@ -3,6 +3,7 @@ export REGION=us-central1
 export TOPIC_ID=swe590-pubsub-topic
 export BUCKET_NAME=swe590-bucket
 export GOOGLE_APPLICATION_CREDENTIALS=../../../../my-project-1509787322529-c23342119a92.json
+export WORKER_ZONE=us-central1-c
 
 function deploy-dataflow-pipeline() {
   mvn clean compile exec:java \
@@ -15,9 +16,10 @@ function deploy-dataflow-pipeline() {
     --output=gs://$BUCKET_NAME/temp/dataflow/helloworld \
     --runner=DataflowRunner \
     --windowSize=10 \
-    --workerMachineType=n1-standard-1 \
+    --workerMachineType=f1-micro \
     --maxNumWorkers=2 \
-    --numWorkers=1
+    --numWorkers=1 \
+    --workerZone=$WORKER_ZONE
   "
 }
 

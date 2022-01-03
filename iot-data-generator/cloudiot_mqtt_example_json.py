@@ -118,6 +118,12 @@ def parse_command_line_args():
             default=100,
             help='Number of messages to publish.')
     parser.add_argument(
+        '--delay_in_seconds',
+        type=int,
+        default=1,
+        help='Delay in seconds between messages.'
+    )
+    parser.add_argument(
             '--message_type',
             choices=('event', 'state'),
             default='event',
@@ -202,7 +208,8 @@ def main():
         client.publish(mqtt_topic, jsonpayload, qos=1)
 
         # Send events every second. State should not be updated as often
-        time.sleep(1 if args.message_type == 'event' else 5)
+        # time.sleep(1 if args.message_type == 'event' else 5)
+        time.sleep(args.delay_in_seconds)
 
     # End the network loop and finish.
     client.loop_stop()

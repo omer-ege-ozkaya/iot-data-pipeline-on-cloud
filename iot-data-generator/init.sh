@@ -11,7 +11,9 @@ function start-iot-json-generator() {
      --device_id=swe590-sensor-"$1" \
      --private_key_file=rsa_private.pem \
      --message_type=event \
-     --algorithm=RS256
+     --algorithm=RS256 \
+     --delay_in_seconds="0.1" \
+     --num-messages=2000
 }
 
 function start-iot-generator() {

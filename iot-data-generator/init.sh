@@ -13,7 +13,7 @@ function start-iot-json-generator() {
      --message_type=event \
      --algorithm=RS256 \
      --delay_in_seconds="1" \
-     --num_messages=100
+     --num_messages=1000
 }
 
 function start-iot-generator() {

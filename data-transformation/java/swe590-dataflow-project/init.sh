@@ -15,7 +15,7 @@ function deploy-dataflow-pipeline() {
     --output=gs://$BUCKET_NAME/temp/dataflow/helloworld \
     --runner=DataflowRunner \
     --windowSize=10 \
-    --machineType=n1-standard-1 \
+    --workerMachineType=n1-standard-1 \
     --maxNumWorkers=2 \
     --numWorkers=1
   "

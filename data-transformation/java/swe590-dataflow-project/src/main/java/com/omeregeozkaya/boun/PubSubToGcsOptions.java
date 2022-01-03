@@ -26,7 +26,4 @@ public interface PubSubToGcsOptions extends DataflowPipelineOptions {
     String getOutput();
 
     void setOutput(String value);
-
-    Integer getDelaySeconds();
-    void setDelaySeconds(Integer value);
 }

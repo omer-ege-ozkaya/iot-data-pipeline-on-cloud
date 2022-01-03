@@ -91,7 +91,7 @@ public class StarterPipeline {
                 new SimpleFunction<String, String>() {
                     @Override
                     public String apply(String input) {
-                        long targetTime = System.currentTimeMillis() + options.getDelaySeconds() * 1000;
+                        long targetTime = System.currentTimeMillis() + 10 * 1000;
                         int x = 0;
                         while (System.currentTimeMillis() < targetTime) {
                             x = x + (x%2 == 0 ? -1 : 1);

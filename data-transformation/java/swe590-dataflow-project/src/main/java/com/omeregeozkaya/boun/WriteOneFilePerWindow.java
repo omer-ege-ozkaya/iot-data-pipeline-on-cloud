@@ -20,7 +20,7 @@ import org.joda.time.format.DateTimeFormatter;
 import org.joda.time.format.ISODateTimeFormat;
 
 public class WriteOneFilePerWindow extends PTransform<PCollection<String>, PDone>{
-    private static final DateTimeFormatter FORMATTER = ISODateTimeFormat.hourMinute();
+    private static final DateTimeFormatter FORMATTER = ISODateTimeFormat.hourMinuteSecond();
     private String filenamePrefix;
     @Nullable private Integer numShards;
 

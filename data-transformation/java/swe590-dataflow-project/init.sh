@@ -14,7 +14,10 @@ function deploy-dataflow-pipeline() {
     --inputTopic=projects/$PROJECT_ID/topics/$TOPIC_ID \
     --output=gs://$BUCKET_NAME/temp/dataflow/helloworld \
     --runner=DataflowRunner \
-    --windowSize=10
+    --windowSize=10 \
+    --machineType=n1-standard-1 \
+    --maxNumWorkers=2 \
+    --numWorkers=1
   "
 }
 

@@ -119,8 +119,8 @@ def parse_command_line_args():
             help='Number of messages to publish.')
     parser.add_argument(
         '--delay_in_seconds',
-        type=int,
-        default=1,
+        type=float,
+        default=1.0,
         help='Delay in seconds between messages.'
     )
     parser.add_argument(

@@ -12,8 +12,8 @@ function start-iot-json-generator() {
      --private_key_file=rsa_private.pem \
      --message_type=event \
      --algorithm=RS256 \
-     --delay_in_seconds="0.001" \
-     --num_messages=100000
+     --delay_in_seconds="1" \
+     --num_messages=100
 }
 
 function start-iot-generator() {

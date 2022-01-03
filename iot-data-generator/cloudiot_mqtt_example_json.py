@@ -83,7 +83,7 @@ def on_disconnect(unused_client, unused_userdata, rc):
 
 def on_publish(unused_client, unused_userdata, unused_mid):
     """Paho callback when a message is sent to the broker."""
-    # print('on_publish')
+    print('on_publish')
 
 
 def parse_command_line_args():
@@ -199,9 +199,9 @@ def main():
 
         simulated_temp = simulated_temp + temperature_trend * random.normalvariate(0.01,0.005)
         payload = {"timestamp": int(time.time()), "device": args.device_id, "temperature": simulated_temp}
-        # print('Publishing message {} of {}: \'{}\''.format(
-        #         i, args.num_messages, payload))
-        jsonpayload =  json.dumps(payload,indent=4)
+        print('Publishing message {} of {}: \'{}\''.format(
+                i, args.num_messages, payload))
+        jsonpayload = json.dumps(payload, indent=4)
         # Publish "jsonpayload" to the MQTT topic. qos=1 means at least once
         # delivery. Cloud IoT Core also supports qos=0 for at most once
         # delivery.

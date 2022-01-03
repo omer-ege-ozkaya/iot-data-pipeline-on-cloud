@@ -17,7 +17,8 @@ function deploy-dataflow-pipeline() {
     --windowSize=10 \
     --workerMachineType=n1-standard-1 \
     --maxNumWorkers=2 \
-    --numWorkers=1
+    --numWorkers=1 \
+    --delaySeconds=10
   "
 }
 

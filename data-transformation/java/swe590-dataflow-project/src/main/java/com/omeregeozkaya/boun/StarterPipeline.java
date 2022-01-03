@@ -23,10 +23,13 @@ import org.apache.beam.sdk.options.PipelineOptionsFactory;
 import org.apache.beam.sdk.transforms.Create;
 import org.apache.beam.sdk.transforms.DoFn;
 import org.apache.beam.sdk.transforms.MapElements;
+import org.apache.beam.sdk.transforms.PTransform;
 import org.apache.beam.sdk.transforms.ParDo;
 import org.apache.beam.sdk.transforms.SimpleFunction;
 import org.apache.beam.sdk.transforms.windowing.FixedWindows;
 import org.apache.beam.sdk.transforms.windowing.Window;
+import org.apache.beam.sdk.values.PCollection;
+import org.apache.beam.sdk.values.POutput;
 import org.joda.time.Duration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,15 +46,19 @@ import org.slf4j.LoggerFactory;
  *
  * <p>To run this starter example using managed resource in Google Cloud
  * Platform, you should specify the following command-line options:
- *   --project=<YOUR_PROJECT_ID>
- *   --stagingLocation=<STAGING_LOCATION_IN_CLOUD_STORAGE>
- *   --runner=DataflowRunner
+ * --project=<YOUR_PROJECT_ID>
+ * --stagingLocation=<STAGING_LOCATION_IN_CLOUD_STORAGE>
+ * --runner=DataflowRunner
  */
 public class StarterPipeline {
-  private static final Logger LOG = LoggerFactory.getLogger(StarterPipeline.class);
+    private static final Logger LOG = LoggerFactory.getLogger(StarterPipeline.class);
 
-  public static void main(String[] args) {
-    //region helloworld
+    //  long targetTime = System.currentTimeMillis() + options.getDelaySeconds() * 1000;
+//            while (System.currentTimeMillis() < targetTime) {
+//    int x = 1 + 1;
+//  }
+    public static void main(String[] args) {
+        //region helloworld
 //    Pipeline p = Pipeline.create(
 //        PipelineOptionsFactory.fromArgs(args).withValidation().create());
 //
@@ -70,19 +77,32 @@ public class StarterPipeline {
 //    }));
 //
 //    p.run();
-    //endregion
-    int numShards = 1;
-    PubSubToGcsOptions options = PipelineOptionsFactory.fromArgs(args).withValidation().as(PubSubToGcsOptions.class);
+        //endregion
+        int numShards = 1;
+        PubSubToGcsOptions options = PipelineOptionsFactory.fromArgs(args).withValidation().as(PubSubToGcsOptions.class);
 
-    options.setStreaming(true);
+        options.setStreaming(true);
 
-    Pipeline pipeline = Pipeline.create(options);
+        Pipeline pipeline = Pipeline.create(options);
 
-    pipeline
-        .apply("Read PubSub Messages", PubsubIO.readStrings().fromTopic(options.getInputTopic()))
-        .apply(Window.into(FixedWindows.of(Duration.standardSeconds(options.getWindowSize()))))
-        .apply("Write files to GCS", new WriteOneFilePerWindow(options.getOutput(), numShards));
+        pipeline
+            .apply("Read PubSub Messages", PubsubIO.readStrings().fromTopic(options.getInputTopic()))
+            .apply(MapElements.via(
+                new SimpleFunction<String, String>() {
+                    @Override
+                    public String apply(String input) {
+                        long targetTime = System.currentTimeMillis() + options.getDelaySeconds() * 1000;
+                        int x = 0;
+                        while (System.currentTimeMillis() < targetTime) {
+                            x = x + (x%2 == 0 ? -1 : 1);
+                        }
+                        return input;
+                    }
+                }
+            ))
+            .apply(Window.into(FixedWindows.of(Duration.standardSeconds(options.getWindowSize()))))
+            .apply("Write files to GCS", new WriteOneFilePerWindow(options.getOutput(), numShards));
 
-    pipeline.run().waitUntilFinish();
-  }
+        pipeline.run().waitUntilFinish();
+    }
 }

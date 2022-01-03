@@ -199,8 +199,8 @@ def main():
 
         simulated_temp = simulated_temp + temperature_trend * random.normalvariate(0.01,0.005)
         payload = {"timestamp": int(time.time()), "device": args.device_id, "temperature": simulated_temp}
-        print('Publishing message {} of {}: \'{}\''.format(
-                i, args.num_messages, payload))
+        # print('Publishing message {} of {}: \'{}\''.format(
+        #         i, args.num_messages, payload))
         jsonpayload =  json.dumps(payload,indent=4)
         # Publish "jsonpayload" to the MQTT topic. qos=1 means at least once
         # delivery. Cloud IoT Core also supports qos=0 for at most once

@@ -22,4 +22,22 @@ function deploy-dataflow-pipeline() {
   "
 }
 
+function test-dataflow-pipeline() {
+  mvn clean compile exec:java \
+  -Dexec.mainClass=com.omeregeozkaya.boun.StarterPipeline \
+  -Dexec.cleanupDaemonThreads=false \
+  -Dexec.args=" \
+    --project=$PROJECT_ID \
+    --region=$REGION \
+    --inputTopic=projects/$PROJECT_ID/topics/$TOPIC_ID \
+    --output=gs://$BUCKET_NAME/temp/dataflow/helloworld \
+    --runner=DirectRunner \
+    --windowSize=10 \
+    --workerMachineType=n1-standard-1 \
+    --maxNumWorkers=2 \
+    --numWorkers=1 \
+    --autoscalingAlgorithm=THROUGHPUT_BASED
+  "
+}
+
 echo 'Enter "deploy-dataflow-pipeline" to deploy dataflow pipeline.'

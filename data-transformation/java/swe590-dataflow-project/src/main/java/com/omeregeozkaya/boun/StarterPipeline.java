@@ -22,6 +22,7 @@ import org.apache.beam.sdk.coders.Coder;
 import org.apache.beam.sdk.coders.KvCoder;
 import org.apache.beam.sdk.coders.RowCoder;
 import org.apache.beam.sdk.coders.StringUtf8Coder;
+import org.apache.beam.sdk.extensions.joinlibrary.Join;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
 import org.apache.beam.sdk.schemas.Schema;
 import org.apache.beam.sdk.testing.TestStream;
@@ -34,12 +35,17 @@ import org.apache.beam.sdk.transforms.PTransform;
 import org.apache.beam.sdk.transforms.ParDo;
 import org.apache.beam.sdk.transforms.SimpleFunction;
 import org.apache.beam.sdk.transforms.WithKeys;
+import org.apache.beam.sdk.transforms.windowing.AfterPane;
 import org.apache.beam.sdk.transforms.windowing.FixedWindows;
+import org.apache.beam.sdk.transforms.windowing.GlobalWindows;
+import org.apache.beam.sdk.transforms.windowing.Trigger;
 import org.apache.beam.sdk.transforms.windowing.Window;
+import org.apache.beam.sdk.transforms.windowing.WindowFn;
 import org.apache.beam.sdk.values.KV;
 import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.Row;
 import org.apache.beam.sdk.values.TimestampedValue;
+import org.apache.beam.sdk.values.WindowingStrategy;
 import org.joda.time.Duration;
 import org.joda.time.Instant;
 import org.slf4j.Logger;
@@ -122,18 +128,19 @@ public class StarterPipeline {
 //            "{\"timestamp\": \"2022-09-15\", \"device\": \"swe590-sensor-2\", \"temperature\": \"19\"}"
 //        );
 //        PCollection<String> rawMessages = pipeline.apply("Creation of data", Create.of(testData));
-//        final List<KV<String, String>> testLookUpData = Arrays.asList(
-//            KV.of("swe590-sensor-1", "İstanbul"),
-//            KV.of("swe590-sensor-2", "İzmir")
-//        );
-//        PCollection<KV<String, String>> lookUpData = pipeline.apply("Creation of lookup data", Create.of(testLookUpData));
+        final List<KV<String, String>> testLookUpData = Arrays.asList(
+            KV.of("swe590-sensor-1", "İstanbul"),
+            KV.of("swe590-sensor-2", "İzmir")
+        );
+        PCollection<KV<String, String>> lookUpData = pipeline
+            .apply("Creation of lookup data", Create.of(testLookUpData));
 
         Schema schema = Schema.builder()
             .addStringField("timestamp")
             .addStringField("device")
             .addStringField("temperature")
             .addNullableField("location", Schema.FieldType.STRING)
-            .addNullableField("avg_temperature", Schema.FieldType.DOUBLE)
+            .addNullableField("avg_temperature_of_the_last_minute_by_location", Schema.FieldType.DOUBLE)
             .build();
 
 
@@ -142,21 +149,35 @@ public class StarterPipeline {
             .apply("json to row", JsonToRow.withSchema(schema));
 
         PCollection<Row> test2 = jsonMessage
-            .apply(WithKeys.of(row -> row.getString("device"))).setCoder(KvCoder.of(StringUtf8Coder.of(), RowCoder.of(schema)))
-            .apply(Window.into(FixedWindows.of(Duration.standardMinutes(1L))))
-            .apply(GroupByKey.create())
-            .apply(ParDo.of(
+            .apply("Key device", WithKeys.of(row -> row.getString("device"))).setCoder(KvCoder.of(StringUtf8Coder.of(), RowCoder.of(schema)))
+            .apply("Fix window", Window.into(FixedWindows.of(Duration.standardMinutes(1L))))
+            .apply("Inner join", Join.InnerJoin.with(lookUpData))
+            .apply("Inner join step 2", ParDo.of(
+                new DoFn<KV<String, KV<Row, String>>, KV<String, Row>>() {
+                    @ProcessElement
+                    public void pe(@Element KV<String, KV<Row, String>> input, OutputReceiver<KV<String, Row>> outputReceiver) {
+                        System.out.println(input);
+                        KV<String, Row> output = KV.of(
+                            input.getValue().getValue(),
+                            input.getValue().getKey()
+                        );
+                        outputReceiver.output(output);
+                    }
+                }
+            )).setCoder(KvCoder.of(StringUtf8Coder.of(), RowCoder.of(schema)))
+            .apply("Group by", GroupByKey.create())
+            .apply("Average", ParDo.of(
                 new DoFn<KV<String, Iterable<Row>>, Row>() {
                     @ProcessElement
                     public void pe(ProcessContext pc) {
                         Double avg = StreamSupport.stream(pc.element().getValue().spliterator(), false)
-                            .mapToDouble(row -> Double.parseDouble(row.getString("temperature")))
+                            .mapToDouble(row -> Double.parseDouble(row.getString("avg_temperature_of_the_last_minute_by_location")))
                             .average().orElseThrow();
                         for (Row row : pc.element().getValue()) {
                             Row result = Row.fromRow(row)
-                                .withFieldValue("avg_temperature", avg)
+                                .withFieldValue("avg_temperature_of_the_last_minute_by_location", avg)
                                 .build();
-//                            System.out.println(result);
+                            System.out.println(result);
                             pc.output(result);
                         }
                     }

@@ -24,6 +24,7 @@ import org.apache.beam.sdk.coders.RowCoder;
 import org.apache.beam.sdk.coders.StringUtf8Coder;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
 import org.apache.beam.sdk.schemas.Schema;
+import org.apache.beam.sdk.testing.TestStream;
 import org.apache.beam.sdk.transforms.Create;
 import org.apache.beam.sdk.transforms.DoFn;
 import org.apache.beam.sdk.transforms.GroupByKey;
@@ -33,9 +34,14 @@ import org.apache.beam.sdk.transforms.PTransform;
 import org.apache.beam.sdk.transforms.ParDo;
 import org.apache.beam.sdk.transforms.SimpleFunction;
 import org.apache.beam.sdk.transforms.WithKeys;
+import org.apache.beam.sdk.transforms.windowing.FixedWindows;
+import org.apache.beam.sdk.transforms.windowing.Window;
 import org.apache.beam.sdk.values.KV;
 import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.Row;
+import org.apache.beam.sdk.values.TimestampedValue;
+import org.joda.time.Duration;
+import org.joda.time.Instant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -97,18 +103,30 @@ public class StarterPipeline {
 //            .apply("Write files to GCS", new WriteOneFilePerWindow(options.getOutput(), numShards));
 
 //        PCollection<String> messages = pipeline.apply("Read PubSub Messages", PubsubIO.readStrings().fromTopic(options.getInputTopic()));
-        final List<String> testData = Arrays.asList(
-            "{\"timestamp\": \"2021-06-12\", \"device\": \"swe590-sensor-1\", \"temperature\": \"22\"}",
-            "{\"timestamp\": \"2021-07-13\", \"device\": \"swe590-sensor-1\", \"temperature\": \"18\"}",
-            "{\"timestamp\": \"2022-08-14\", \"device\": \"swe590-sensor-2\", \"temperature\": \"24\"}",
-            "{\"timestamp\": \"2022-09-15\", \"device\": \"swe590-sensor-2\", \"temperature\": \"19\"}"
-        );
-        PCollection<String> rawMessages = pipeline.apply("Creation of data", Create.of(testData));
-        final List<KV<String, String>> testLookUpData = Arrays.asList(
-            KV.of("swe590-sensor-1", "İstanbul"),
-            KV.of("swe590-sensor-2", "İzmir")
-        );
-        PCollection<KV<String, String>> lookUpData = pipeline.apply("Creation of lookup data", Create.of(testLookUpData));
+
+
+        TestStream<String> createEvents = TestStream.create(StringUtf8Coder.of())
+            .addElements(
+                TimestampedValue.of("{\"timestamp\": \"2021-01-13\", \"device\": \"swe590-sensor-1\", \"temperature\": \"10\"}", Instant.now()),
+                TimestampedValue.of("{\"timestamp\": \"2021-01-14\", \"device\": \"swe590-sensor-1\", \"temperature\": \"15\"}", Instant.now().plus(Duration.standardSeconds(30L))),
+                TimestampedValue.of("{\"timestamp\": \"2022-01-15\", \"device\": \"swe590-sensor-1\", \"temperature\": \"20\"}", Instant.now().plus(Duration.standardSeconds(60L))),
+                TimestampedValue.of("{\"timestamp\": \"2022-01-16\", \"device\": \"swe590-sensor-1\", \"temperature\": \"25\"}", Instant.now().plus(Duration.standardSeconds(90L))),
+                TimestampedValue.of("{\"timestamp\": \"2022-01-17\", \"device\": \"swe590-sensor-1\", \"temperature\": \"30\"}", Instant.now().plus(Duration.standardSeconds(120L)))
+            ).advanceWatermarkToInfinity();
+
+
+//        final List<String> testData = Arrays.asList(
+//            "{\"timestamp\": \"2021-06-12\", \"device\": \"swe590-sensor-1\", \"temperature\": \"22\"}",
+//            "{\"timestamp\": \"2021-07-13\", \"device\": \"swe590-sensor-1\", \"temperature\": \"18\"}",
+//            "{\"timestamp\": \"2022-08-14\", \"device\": \"swe590-sensor-2\", \"temperature\": \"24\"}",
+//            "{\"timestamp\": \"2022-09-15\", \"device\": \"swe590-sensor-2\", \"temperature\": \"19\"}"
+//        );
+//        PCollection<String> rawMessages = pipeline.apply("Creation of data", Create.of(testData));
+//        final List<KV<String, String>> testLookUpData = Arrays.asList(
+//            KV.of("swe590-sensor-1", "İstanbul"),
+//            KV.of("swe590-sensor-2", "İzmir")
+//        );
+//        PCollection<KV<String, String>> lookUpData = pipeline.apply("Creation of lookup data", Create.of(testLookUpData));
 
         Schema schema = Schema.builder()
             .addStringField("timestamp")
@@ -118,20 +136,14 @@ public class StarterPipeline {
             .addNullableField("avg_temperature", Schema.FieldType.DOUBLE)
             .build();
 
-        PCollection<Row> jsonMessage = rawMessages.apply("json to row", JsonToRow.withSchema(schema));
 
-        PCollection<Row> test = jsonMessage.apply("display", ParDo.of(
-            new DoFn<Row, Row>() {
-                @ProcessElement
-                public void processElement(@Element Row row, OutputReceiver<Row> outputReceiver) {
-//                    System.out.println(row);
-                    outputReceiver.output(row);
-                }
-            }
-        )).setRowSchema(schema);
+        PCollection<Row> jsonMessage = pipeline
+            .apply(createEvents)
+            .apply("json to row", JsonToRow.withSchema(schema));
 
-        PCollection<Row> test2 = test
+        PCollection<Row> test2 = jsonMessage
             .apply(WithKeys.of(row -> row.getString("device"))).setCoder(KvCoder.of(StringUtf8Coder.of(), RowCoder.of(schema)))
+            .apply(Window.into(FixedWindows.of(Duration.standardMinutes(1L))))
             .apply(GroupByKey.create())
             .apply(ParDo.of(
                 new DoFn<KV<String, Iterable<Row>>, Row>() {
@@ -145,14 +157,13 @@ public class StarterPipeline {
                                 .withFieldValue("avg_temperature", avg)
                                 .build();
 //                            System.out.println(result);
-                            pc.output(row);
+                            pc.output(result);
                         }
                     }
                 }
             )).setRowSchema(schema);
 
         PCollection<Row> test3 = test2.apply(PrintPCollection.create());
-
 
 //        PCollection<JsonMessage> jsonMessage = rawMessages.apply("Telemetry data to JsonObject", ParDo.of(
 //                new DoFn<String, JsonMessage>() {

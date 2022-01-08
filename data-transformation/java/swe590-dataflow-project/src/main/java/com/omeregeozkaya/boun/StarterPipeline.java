@@ -17,80 +17,60 @@
  */
 package com.omeregeozkaya.boun;
 
-import com.google.api.client.json.Json;
-import com.google.api.client.json.gson.GsonFactory;
-import com.google.api.services.bigquery.model.TableRow;
-import com.google.gson.Gson;
-import com.google.gson.JsonObject;
 import org.apache.beam.sdk.Pipeline;
-import org.apache.beam.sdk.io.TextIO;
-import org.apache.beam.sdk.io.gcp.pubsub.PubsubIO;
+import org.apache.beam.sdk.coders.Coder;
+import org.apache.beam.sdk.coders.KvCoder;
+import org.apache.beam.sdk.coders.RowCoder;
+import org.apache.beam.sdk.coders.StringUtf8Coder;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
-import org.apache.beam.sdk.schemas.transforms.Join;
+import org.apache.beam.sdk.schemas.Schema;
 import org.apache.beam.sdk.transforms.Create;
 import org.apache.beam.sdk.transforms.DoFn;
 import org.apache.beam.sdk.transforms.GroupByKey;
+import org.apache.beam.sdk.transforms.JsonToRow;
+import org.apache.beam.sdk.transforms.MapElements;
 import org.apache.beam.sdk.transforms.PTransform;
 import org.apache.beam.sdk.transforms.ParDo;
-import org.apache.beam.sdk.transforms.display.DisplayData;
-import org.apache.beam.sdk.transforms.join.CoGbkResult;
-import org.apache.beam.sdk.transforms.join.CoGroupByKey;
-import org.apache.beam.sdk.transforms.join.KeyedPCollectionTuple;
+import org.apache.beam.sdk.transforms.SimpleFunction;
+import org.apache.beam.sdk.transforms.WithKeys;
 import org.apache.beam.sdk.values.KV;
-import org.apache.beam.sdk.values.PBegin;
 import org.apache.beam.sdk.values.PCollection;
-import org.apache.beam.sdk.values.PCollectionTuple;
-import org.apache.beam.sdk.values.TupleTag;
-import org.apache.beam.sdk.values.TypeDescriptor;
-import org.joda.time.Duration;
+import org.apache.beam.sdk.values.Row;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Arrays;
 import java.util.List;
-import java.util.Objects;
-import java.util.function.Consumer;
+import java.util.stream.StreamSupport;
 
-/**
- * A starter example for writing Beam programs.
- *
- * <p>The example takes two strings, converts them to their upper-case
- * representation and logs them.
- *
- * <p>To run this starter example locally using DirectRunner, just
- * execute it without any additional parameters from your favorite development
- * environment.
- *
- * <p>To run this starter example using managed resource in Google Cloud
- * Platform, you should specify the following command-line options:
- * --project=<YOUR_PROJECT_ID>
- * --stagingLocation=<STAGING_LOCATION_IN_CLOUD_STORAGE>
- * --runner=DataflowRunner
- */
+class PrintPCollection<T> extends PTransform<PCollection<T>, PCollection<T>> {
+
+    static <T> PrintPCollection<T> create() {
+        return new PrintPCollection<>();
+    }
+
+    @Override
+    public PCollection<T> expand(PCollection<T> input) {
+        Coder<T> coder = input.getCoder();
+        PCollection<T> pCollection = input.apply(
+            MapElements.via(
+                new SimpleFunction<T, T>() {
+                    @Override
+                    public T apply(T input) {
+                        System.out.println(input);
+                        return input;
+                    }
+                }
+            )
+        ).setCoder(coder);
+        return pCollection;
+    }
+}
+
 public class StarterPipeline {
     private static final Logger LOG = LoggerFactory.getLogger(StarterPipeline.class);
 
     public static void main(String[] args) {
-        //region helloworld
-//    Pipeline p = Pipeline.create(
-//        PipelineOptionsFactory.fromArgs(args).withValidation().create());
-//
-//    p.apply(Create.of("Hello", "World"))
-//    .apply(MapElements.via(new SimpleFunction<String, String>() {
-//      @Override
-//      public String apply(String input) {
-//        return input.toUpperCase();
-//      }
-//    }))
-//    .apply(ParDo.of(new DoFn<String, Void>() {
-//      @ProcessElement
-//      public void processElement(ProcessContext c)  {
-//        LOG.info(c.element());
-//      }
-//    }));
-//
-//    p.run();
-        //endregion
         int numShards = 1;
         PubSubToGcsOptions options = PipelineOptionsFactory.fromArgs(args).withValidation().as(PubSubToGcsOptions.class);
 
@@ -118,83 +98,138 @@ public class StarterPipeline {
 
 //        PCollection<String> messages = pipeline.apply("Read PubSub Messages", PubsubIO.readStrings().fromTopic(options.getInputTopic()));
         final List<String> testData = Arrays.asList(
-            "{\"timestamp\": \"2021-06-12\", \"device\": \"ist\", \"temperature\": \"22\"}",
-            "{\"timestamp\": \"2021-07-13\", \"device\": \"ist\", \"temperature\": \"18\"}",
-            "{\"timestamp\": \"2022-08-14\", \"device\": \"ord\", \"temperature\": \"24\"}",
-            "{\"timestamp\": \"2022-09-15\", \"device\": \"ord\", \"temperature\": \"19\"}"
+            "{\"timestamp\": \"2021-06-12\", \"device\": \"swe590-sensor-1\", \"temperature\": \"22\"}",
+            "{\"timestamp\": \"2021-07-13\", \"device\": \"swe590-sensor-1\", \"temperature\": \"18\"}",
+            "{\"timestamp\": \"2022-08-14\", \"device\": \"swe590-sensor-2\", \"temperature\": \"24\"}",
+            "{\"timestamp\": \"2022-09-15\", \"device\": \"swe590-sensor-2\", \"temperature\": \"19\"}"
         );
         PCollection<String> rawMessages = pipeline.apply("Creation of data", Create.of(testData));
         final List<KV<String, String>> testLookUpData = Arrays.asList(
-            KV.of("ist", "İstanbul"),
-            KV.of("ord", "Ordu"),
-            KV.of("izm", "İzmir")
+            KV.of("swe590-sensor-1", "İstanbul"),
+            KV.of("swe590-sensor-2", "İzmir")
         );
         PCollection<KV<String, String>> lookUpData = pipeline.apply("Creation of lookup data", Create.of(testLookUpData));
-        PCollection<JsonMessage> jsonMessage = rawMessages.apply("Message to JsonMessage", ParDo.of(
-                new DoFn<String, JsonMessage>() {
-                    @ProcessElement
-                    public void processElement(@Element String message, OutputReceiver<JsonMessage> out) {
-                        Gson gson = new Gson();
-                        JsonMessage jsonMessage = gson.fromJson(message, JsonMessage.class);
-//                        System.out.println(jsonMessage);
-                        out.output(jsonMessage);
-                    }
-                }
-            )
-        );
-        PCollection<KV<String, JsonMessage>> keyedMessages = jsonMessage.apply("Key added to JsonMessage", ParDo.of(
-                new DoFn<JsonMessage, KV<String, JsonMessage>>() {
-                    @ProcessElement
-                    public void processElement(@Element JsonMessage jsonMessage, OutputReceiver<KV<String, JsonMessage>> out) {
-                        KV<String, JsonMessage> kv = KV.of(jsonMessage.getDevice(), jsonMessage);
-//                        System.out.println(kv);
-                        out.output(kv);
-                    }
-                }
-            )
-        );
-        PCollection<KV<String, Iterable<JsonMessage>>> groupedMessagesByDevice = keyedMessages.apply("Group messages by device",
-            GroupByKey.<String, JsonMessage>create()
-        );
-        PCollection<KV<String, Double>> averageTemperatureByDevice = groupedMessagesByDevice.apply("Average temperature by device",
-            ParDo.of(
-                new DoFn<KV<String, Iterable<JsonMessage>>, KV<String, Double>>() {
-                    @ProcessElement
-                    public void processElement(@Element KV<String, Iterable<JsonMessage>> kv, OutputReceiver<KV<String, Double>> out) {
-                        int sum = 0;
-                        int count = 0;
-                        for (JsonMessage jsonMessage : Objects.requireNonNull(kv.getValue())) {
-                            sum += Integer.parseInt(jsonMessage.getTemperature());
-                            count++;
-                        }
-                        Double average = (double) sum / count;
-                        KV<String, Double> averageOfDevice = KV.of(kv.getKey(), average);
-//                        System.out.println(averageOfDevice);
-                        out.output(averageOfDevice);
-                    }
-                }
-            )
-        );
-        final TupleTag<Double> averageTemperatureByDeviceTag = new TupleTag<>();
-        final TupleTag<String> lookUpDataTag = new TupleTag<>();
-        PCollection<KV<String, CoGbkResult>> joined =
-            KeyedPCollectionTuple
-                .of(averageTemperatureByDeviceTag, averageTemperatureByDevice)
-                .and(lookUpDataTag, lookUpData)
-                .apply("Join by cogroupbykey", CoGroupByKey.create());
-        PCollection<String> test = joined.apply("Test", ParDo.of(
-            new DoFn<KV<String, CoGbkResult>, String>() {
+
+        Schema schema = Schema.builder()
+            .addStringField("timestamp")
+            .addStringField("device")
+            .addStringField("temperature")
+            .addNullableField("location", Schema.FieldType.STRING)
+            .addNullableField("avg_temperature", Schema.FieldType.DOUBLE)
+            .build();
+
+        PCollection<Row> jsonMessage = rawMessages.apply("json to row", JsonToRow.withSchema(schema));
+
+        PCollection<Row> test = jsonMessage.apply("display", ParDo.of(
+            new DoFn<Row, Row>() {
                 @ProcessElement
-                public void processElement(ProcessContext processContext) {
-                    KV<String, CoGbkResult> result = processContext.element();
-                    String key = result.getKey();
-                    Iterable<Double> temp = result.getValue().getAll(averageTemperatureByDeviceTag);
-                    Iterable<String> city = result.getValue().getAll(lookUpDataTag);
-                    System.out.println(key + temp.toString() + city.toString());
+                public void processElement(@Element Row row, OutputReceiver<Row> outputReceiver) {
+//                    System.out.println(row);
+                    outputReceiver.output(row);
                 }
             }
-        ) );
+        )).setRowSchema(schema);
 
+        PCollection<Row> test2 = test
+            .apply(WithKeys.of(row -> row.getString("device"))).setCoder(KvCoder.of(StringUtf8Coder.of(), RowCoder.of(schema)))
+            .apply(GroupByKey.create())
+            .apply(ParDo.of(
+                new DoFn<KV<String, Iterable<Row>>, Row>() {
+                    @ProcessElement
+                    public void pe(ProcessContext pc) {
+                        Double avg = StreamSupport.stream(pc.element().getValue().spliterator(), false)
+                            .mapToDouble(row -> Double.parseDouble(row.getString("temperature")))
+                            .average().orElseThrow();
+                        for (Row row : pc.element().getValue()) {
+                            Row result = Row.fromRow(row)
+                                .withFieldValue("avg_temperature", avg)
+                                .build();
+//                            System.out.println(result);
+                            pc.output(row);
+                        }
+                    }
+                }
+            )).setRowSchema(schema);
+
+        PCollection<Row> test3 = test2.apply(PrintPCollection.create());
+
+
+//        PCollection<JsonMessage> jsonMessage = rawMessages.apply("Telemetry data to JsonObject", ParDo.of(
+//                new DoFn<String, JsonMessage>() {
+//                    @ProcessElement
+//                    public void processElement(@Element String message, OutputReceiver<JsonMessage> out) {
+//                        Gson gson = new Gson();
+//                        JsonMessage jsonMessage = gson.fromJson(message, JsonMessage.class);
+//                        out.output(jsonMessage);
+//                    }
+//                }
+//            )
+//        );
+//        PCollection<KV<String, JsonMessage>> keyedMessages = jsonMessage.apply("Device id key added to PCollection", ParDo.of(
+//                new DoFn<JsonMessage, KV<String, JsonMessage>>() {
+//                    @ProcessElement
+//                    public void processElement(@Element JsonMessage jsonMessage, OutputReceiver<KV<String, JsonMessage>> out) {
+//                        KV<String, JsonMessage> kv = KV.of(jsonMessage.getDevice(), jsonMessage);
+//                        out.output(kv);
+//                    }
+//                }
+//            )
+//        );
+//
+//        PCollection<KV<String, KV<JsonMessage, String>>> joined = Join.innerJoin(keyedMessages, lookUpData);
+//
+//        PCollection<KV<String, KV<JsonMessage, String>>> test = joined.apply("test", ParDo.of(
+//            new DoFn<KV<String, KV<JsonMessage, String>>, KV<String, KV<JsonMessage, String>>>() {
+//                @ProcessElement
+//                public void processElement(@Element KV<String, KV<JsonMessage, String>> input, OutputReceiver<KV<String, KV<JsonMessage, String>>> out) {
+//                    System.out.println(input);
+//                    out.output(input);
+//                }
+//            }
+//        ));
+
+//        PCollection<KV<String, Iterable<JsonMessage>>> groupedMessagesByDevice = keyedMessages.apply("Group messages by device id",
+//            GroupByKey.<String, JsonMessage>create()
+//        );
+//        PCollection<KV<String, Double>> averageTemperatureByDevice = groupedMessagesByDevice.apply("Average temperature by device",
+//            ParDo.of(
+//                new DoFn<KV<String, Iterable<JsonMessage>>, KV<String, Double>>() {
+//                    @ProcessElement
+//                    public void processElement(@Element KV<String, Iterable<JsonMessage>> kv, OutputReceiver<KV<String, Double>> out) {
+//                        int sum = 0;
+//                        int count = 0;
+//                        for (JsonMessage jsonMessage : Objects.requireNonNull(kv.getValue())) {
+//                            sum += Integer.parseInt(jsonMessage.getTemperature());
+//                            count++;
+//                        }
+//                        Double average = (double) sum / count;
+//                        KV<String, Double> averageOfDevice = KV.of(kv.getKey(), average);
+//                        out.output(averageOfDevice);
+//                    }
+//                }
+//            )
+//        );
+
+
+//        final TupleTag<Double> averageTemperatureByDeviceTag = new TupleTag<>();
+//        final TupleTag<String> lookUpDataTag = new TupleTag<>();
+//        PCollection<KV<String, CoGbkResult>> joined =
+//            KeyedPCollectionTuple
+//                .of(averageTemperatureByDeviceTag, averageTemperatureByDevice)
+//                .and(lookUpDataTag, lookUpData)
+//                .apply("Join by cogroupbykey", CoGroupByKey.create());
+//        PCollection<String> test = joined.apply("Test", ParDo.of(
+//            new DoFn<KV<String, CoGbkResult>, String>() {
+//                @ProcessElement
+//                public void processElement(ProcessContext processContext) {
+//                    KV<String, CoGbkResult> result = processContext.element();
+//                    String key = result.getKey();
+//                    Iterable<Double> temp = result.getValue().getAll(averageTemperatureByDeviceTag);
+//                    Iterable<String> city = result.getValue().getAll(lookUpDataTag);
+//                    System.out.println(key + temp.toString() + city.toString());
+//                }
+//            }
+//        ) );
 
 
 //        final List<KV<String, String>> emailsList =

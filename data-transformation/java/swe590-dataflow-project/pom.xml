@@ -122,7 +122,12 @@
     <dependency>
       <groupId>org.projectlombok</groupId>
       <artifactId>lombok</artifactId>
-      <version>1.18.20</version>
+      <version>1.18.22</version>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.beam</groupId>
+      <artifactId>beam-sdks-java-extensions-join-library</artifactId>
+      <version>2.35.0</version>
     </dependency>
 
   </dependencies>

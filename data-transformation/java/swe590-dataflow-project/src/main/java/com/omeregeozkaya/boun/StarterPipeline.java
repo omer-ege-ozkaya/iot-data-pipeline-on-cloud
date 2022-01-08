@@ -24,6 +24,7 @@ import org.apache.beam.sdk.coders.RowCoder;
 import org.apache.beam.sdk.coders.StringUtf8Coder;
 import org.apache.beam.sdk.extensions.joinlibrary.Join;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
+import org.apache.beam.sdk.schemas.FieldAccessDescriptor;
 import org.apache.beam.sdk.schemas.Schema;
 import org.apache.beam.sdk.testing.TestStream;
 import org.apache.beam.sdk.transforms.Create;
@@ -34,6 +35,7 @@ import org.apache.beam.sdk.transforms.MapElements;
 import org.apache.beam.sdk.transforms.PTransform;
 import org.apache.beam.sdk.transforms.ParDo;
 import org.apache.beam.sdk.transforms.SimpleFunction;
+import org.apache.beam.sdk.transforms.View;
 import org.apache.beam.sdk.transforms.WithKeys;
 import org.apache.beam.sdk.transforms.windowing.AfterPane;
 import org.apache.beam.sdk.transforms.windowing.FixedWindows;
@@ -43,6 +45,7 @@ import org.apache.beam.sdk.transforms.windowing.Window;
 import org.apache.beam.sdk.transforms.windowing.WindowFn;
 import org.apache.beam.sdk.values.KV;
 import org.apache.beam.sdk.values.PCollection;
+import org.apache.beam.sdk.values.PCollectionView;
 import org.apache.beam.sdk.values.Row;
 import org.apache.beam.sdk.values.TimestampedValue;
 import org.apache.beam.sdk.values.WindowingStrategy;
@@ -53,34 +56,16 @@ import org.slf4j.LoggerFactory;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.StreamSupport;
-
-class PrintPCollection<T> extends PTransform<PCollection<T>, PCollection<T>> {
-
-    static <T> PrintPCollection<T> create() {
-        return new PrintPCollection<>();
-    }
-
-    @Override
-    public PCollection<T> expand(PCollection<T> input) {
-        Coder<T> coder = input.getCoder();
-        PCollection<T> pCollection = input.apply(
-            MapElements.via(
-                new SimpleFunction<T, T>() {
-                    @Override
-                    public T apply(T input) {
-                        System.out.println(input);
-                        return input;
-                    }
-                }
-            )
-        ).setCoder(coder);
-        return pCollection;
-    }
-}
 
 public class StarterPipeline {
     private static final Logger LOG = LoggerFactory.getLogger(StarterPipeline.class);
+    private static final String FIELD_NAME_TIMESTAMP = "timestamp";
+    private static final String FIELD_NAME_DEVICE = "device";
+    private static final String FIELD_NAME_TEMPERATURE = "temperature";
+    private static final String FIELD_NAME_LOCATION = "location";
+    private static final String FIELD_NAME_AVG_TEMPERATURE = "avg_temperature_of_the_last_minute_by_location";
 
     public static void main(String[] args) {
         int numShards = 1;
@@ -111,9 +96,9 @@ public class StarterPipeline {
 //        PCollection<String> messages = pipeline.apply("Read PubSub Messages", PubsubIO.readStrings().fromTopic(options.getInputTopic()));
 
 
-        TestStream<String> createEvents = TestStream.create(StringUtf8Coder.of())
-            .addElements(
-                TimestampedValue.of("{\"timestamp\": \"2021-01-13\", \"device\": \"swe590-sensor-1\", \"temperature\": \"10\"}", Instant.now()),
+            TestStream<String> createEvents = TestStream.create(StringUtf8Coder.of())
+                .addElements(
+                    TimestampedValue.of("{\"timestamp\": \"2021-01-13\", \"device\": \"swe590-sensor-1\", \"temperature\": \"10\"}", Instant.now()),
                 TimestampedValue.of("{\"timestamp\": \"2021-01-14\", \"device\": \"swe590-sensor-1\", \"temperature\": \"15\"}", Instant.now().plus(Duration.standardSeconds(30L))),
                 TimestampedValue.of("{\"timestamp\": \"2022-01-15\", \"device\": \"swe590-sensor-1\", \"temperature\": \"20\"}", Instant.now().plus(Duration.standardSeconds(60L))),
                 TimestampedValue.of("{\"timestamp\": \"2022-01-16\", \"device\": \"swe590-sensor-1\", \"temperature\": \"25\"}", Instant.now().plus(Duration.standardSeconds(90L))),
@@ -135,56 +120,59 @@ public class StarterPipeline {
         PCollection<KV<String, String>> lookUpData = pipeline
             .apply("Creation of lookup data", Create.of(testLookUpData));
 
+        PCollectionView<Map<String, String>> lookUpDataView = lookUpData
+            .apply(View.asMap());
+
         Schema schema = Schema.builder()
-            .addStringField("timestamp")
-            .addStringField("device")
-            .addStringField("temperature")
-            .addNullableField("location", Schema.FieldType.STRING)
-            .addNullableField("avg_temperature_of_the_last_minute_by_location", Schema.FieldType.DOUBLE)
+            .addStringField(FIELD_NAME_TIMESTAMP)
+            .addStringField(FIELD_NAME_DEVICE)
+            .addStringField(FIELD_NAME_TEMPERATURE)
+            .addNullableField(FIELD_NAME_LOCATION, Schema.FieldType.STRING)
+            .addNullableField(FIELD_NAME_AVG_TEMPERATURE, Schema.FieldType.DOUBLE)
             .build();
 
 
-        PCollection<Row> jsonMessage = pipeline
+        PCollection<Row> jsonMessages = pipeline
             .apply(createEvents)
-            .apply("json to row", JsonToRow.withSchema(schema));
+            .apply("Window stream into fixed windows of duration of 1 minute", Window.into(FixedWindows.of(Duration.standardMinutes(1L))))
+            .apply("Convert JSON string into to Row object", JsonToRow.withSchema(schema));
 
-        PCollection<Row> test2 = jsonMessage
-            .apply("Key device", WithKeys.of(row -> row.getString("device"))).setCoder(KvCoder.of(StringUtf8Coder.of(), RowCoder.of(schema)))
-            .apply("Fix window", Window.into(FixedWindows.of(Duration.standardMinutes(1L))))
-            .apply("Inner join", Join.InnerJoin.with(lookUpData))
-            .apply("Inner join step 2", ParDo.of(
-                new DoFn<KV<String, KV<Row, String>>, KV<String, Row>>() {
-                    @ProcessElement
-                    public void pe(@Element KV<String, KV<Row, String>> input, OutputReceiver<KV<String, Row>> outputReceiver) {
-                        System.out.println(input);
-                        KV<String, Row> output = KV.of(
-                            input.getValue().getValue(),
-                            input.getValue().getKey()
-                        );
-                        outputReceiver.output(output);
+        PCollection<Row> processedData = jsonMessages
+            .apply("Assign device field as key", WithKeys.of(row -> row.getString(FIELD_NAME_DEVICE))).setCoder(KvCoder.of(StringUtf8Coder.of(), RowCoder.of(schema)))
+            .apply("Add location information using the key, then assign location field as key",
+                ParDo.of(
+                    new DoFn<KV<String, Row>, KV<String, Row>>() {
+                        @ProcessElement
+                        public void pe(@Element KV<String, Row> input, OutputReceiver<KV<String, Row>> outputReceiver, ProcessContext pc) {
+                            Map<String, String> deviceToLocation = pc.sideInput(lookUpDataView);
+                            Row rowWithLocation = Row.fromRow(input.getValue())
+                                .withFieldValue(FIELD_NAME_LOCATION, deviceToLocation.get(input.getKey()))
+                                .build();
+                            KV<String, Row> output = KV.of(rowWithLocation.getString(FIELD_NAME_LOCATION), rowWithLocation);
+                            outputReceiver.output(output);
+                        }
                     }
-                }
-            )).setCoder(KvCoder.of(StringUtf8Coder.of(), RowCoder.of(schema)))
-            .apply("Group by", GroupByKey.create())
-            .apply("Average", ParDo.of(
+                ).withSideInputs(lookUpDataView)
+            )
+            .apply("Group by using the key", GroupByKey.create())
+            .apply("Calculate and add the average temperature of the last 1 minute by location", ParDo.of(
                 new DoFn<KV<String, Iterable<Row>>, Row>() {
                     @ProcessElement
                     public void pe(ProcessContext pc) {
                         Double avg = StreamSupport.stream(pc.element().getValue().spliterator(), false)
-                            .mapToDouble(row -> Double.parseDouble(row.getString("avg_temperature_of_the_last_minute_by_location")))
+                            .mapToDouble(row -> Double.parseDouble(row.getString(FIELD_NAME_TEMPERATURE)))
                             .average().orElseThrow();
                         for (Row row : pc.element().getValue()) {
                             Row result = Row.fromRow(row)
-                                .withFieldValue("avg_temperature_of_the_last_minute_by_location", avg)
+                                .withFieldValue(FIELD_NAME_AVG_TEMPERATURE, avg)
                                 .build();
-                            System.out.println(result);
                             pc.output(result);
                         }
                     }
                 }
             )).setRowSchema(schema);
 
-        PCollection<Row> test3 = test2.apply(PrintPCollection.create());
+        PCollection<Row> test3 = processedData.apply(PrintPCollection.create());
 
 //        PCollection<JsonMessage> jsonMessage = rawMessages.apply("Telemetry data to JsonObject", ParDo.of(
 //                new DoFn<String, JsonMessage>() {
@@ -336,5 +324,29 @@ public class StarterPipeline {
 //                "julia; ['julia@example.com']; []");
 
         pipeline.run().waitUntilFinish();
+    }
+}
+
+class PrintPCollection<T> extends PTransform<PCollection<T>, PCollection<T>> {
+
+    static <T> PrintPCollection<T> create() {
+        return new PrintPCollection<>();
+    }
+
+    @Override
+    public PCollection<T> expand(PCollection<T> input) {
+        Coder<T> coder = input.getCoder();
+        PCollection<T> pCollection = input.apply(
+            MapElements.via(
+                new SimpleFunction<T, T>() {
+                    @Override
+                    public T apply(T input) {
+                        System.out.println(input);
+                        return input;
+                    }
+                }
+            )
+        ).setCoder(coder);
+        return pCollection;
     }
 }

@@ -17,12 +17,27 @@
  */
 package com.omeregeozkaya.boun;
 
+import com.google.api.services.bigquery.Bigquery;
+import com.google.api.services.bigquery.BigqueryRequest;
+import com.google.api.services.bigquery.model.TableFieldSchema;
+import com.google.api.services.bigquery.model.TableRow;
+import com.google.cloud.bigquery.BigQuery;
+import com.google.cloud.bigquery.BigQueryOptions;
+import com.google.cloud.bigquery.Field;
+import com.google.cloud.bigquery.StandardSQLTypeName;
+import com.google.cloud.bigquery.StandardTableDefinition;
+import com.google.cloud.bigquery.Table;
+import com.google.cloud.bigquery.TableDefinition;
+import com.google.cloud.bigquery.TableId;
+import com.google.cloud.bigquery.TableInfo;
 import org.apache.beam.sdk.Pipeline;
-import org.apache.beam.sdk.coders.Coder;
 import org.apache.beam.sdk.coders.KvCoder;
 import org.apache.beam.sdk.coders.RowCoder;
 import org.apache.beam.sdk.coders.StringUtf8Coder;
-import org.apache.beam.sdk.extensions.joinlibrary.Join;
+import org.apache.beam.sdk.io.gcp.bigquery.BigQueryHelpers;
+import org.apache.beam.sdk.io.gcp.bigquery.BigQueryIO;
+import org.apache.beam.sdk.io.gcp.bigquery.BigQueryServices;
+import org.apache.beam.sdk.io.gcp.bigquery.BigQueryUtils;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
 import org.apache.beam.sdk.schemas.Schema;
 import org.apache.beam.sdk.testing.TestStream;
@@ -30,10 +45,7 @@ import org.apache.beam.sdk.transforms.Create;
 import org.apache.beam.sdk.transforms.DoFn;
 import org.apache.beam.sdk.transforms.GroupByKey;
 import org.apache.beam.sdk.transforms.JsonToRow;
-import org.apache.beam.sdk.transforms.MapElements;
-import org.apache.beam.sdk.transforms.PTransform;
 import org.apache.beam.sdk.transforms.ParDo;
-import org.apache.beam.sdk.transforms.SimpleFunction;
 import org.apache.beam.sdk.transforms.View;
 import org.apache.beam.sdk.transforms.WithKeys;
 import org.apache.beam.sdk.transforms.windowing.FixedWindows;
@@ -53,11 +65,10 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
-public class StarterPipeline {
-    private static final Logger LOG = LoggerFactory.getLogger(StarterPipeline.class);
+public class PubSubToBigQueryIotDataPipeline {
+    private static final Logger LOGGER = LoggerFactory.getLogger(PubSubToBigQueryIotDataPipeline.class);
     private static final String FIELD_NAME_TIMESTAMP = "timestamp";
     private static final String FIELD_NAME_DEVICE = "device";
     private static final String FIELD_NAME_TEMPERATURE = "temperature";
@@ -66,7 +77,7 @@ public class StarterPipeline {
     private static final String FIELD_NAME_UUID = "uuid";
 
     public static void main(String[] args) {
-        PubSubToGcsOptions options = PipelineOptionsFactory.fromArgs(args).withValidation().as(PubSubToGcsOptions.class);
+        PubSubBigQueryGCStorageOptions options = PipelineOptionsFactory.fromArgs(args).withValidation().as(PubSubBigQueryGCStorageOptions.class);
 
         options.setStreaming(true);
 
@@ -131,7 +142,7 @@ public class StarterPipeline {
 
 
         PCollection<Row> jsonMessages = pipeline
-            .apply(createEvents)
+            .apply("Ingest events", createEvents)
             .apply("Convert JSON string into to Row object", JsonToRow.withSchema(schema));
 
         PCollection<KV<String, Row>> enrichedData = jsonMessages
@@ -154,8 +165,8 @@ public class StarterPipeline {
             );
 
         PCollectionView<Map<String, Double>> averageTemperatureByLocation = enrichedData
-            .apply("Window stream into fixed windows of duration of 1 minute", Window.into(SlidingWindows.of(Duration.standardMinutes(1L)).every(Duration.standardSeconds(5L))))
-            .apply("Group by using the key", GroupByKey.create())
+            .apply("Window stream into sliding windows of duration of 1 minute every 5 seconds", Window.into(SlidingWindows.of(Duration.standardMinutes(1L)).every(Duration.standardSeconds(5L))))
+            .apply("Group by using the location key", GroupByKey.create())
             .apply("Calculate and add the average temperature of the last 1 minute by location", ParDo.of(
                 new DoFn<KV<String, Iterable<Row>>, KV<String, Double>>() {
                     @ProcessElement
@@ -168,10 +179,10 @@ public class StarterPipeline {
                     }
                 }
             ))
-            .apply(View.asMap());
+            .apply("Convert location-temperature PCollection into PCView", View.asMap());
 
         PCollection<Row> dataWithAverageTemperature = enrichedData
-            .apply(Window.into(FixedWindows.of(Duration.standardSeconds(5L))))
+            .apply("Window stream into fixed windows of duration of 5 seconds", Window.into(FixedWindows.of(Duration.standardSeconds(5L))))
             .apply(ParDo.of(
                 new DoFn<KV<String, Row>, Row>() {
                     @ProcessElement
@@ -187,32 +198,67 @@ public class StarterPipeline {
                 }
             ).withSideInputs(averageTemperatureByLocation)).setRowSchema(schema);
 
-//        dataWithAverageTemperature.apply(PrintPCollection.create());
-
-        pipeline.run().waitUntilFinish();
-    }
-}
-
-class PrintPCollection<T> extends PTransform<PCollection<T>, PCollection<T>> {
-
-    static <T> PrintPCollection<T> create() {
-        return new PrintPCollection<>();
-    }
-
-    @Override
-    public PCollection<T> expand(PCollection<T> input) {
-        Coder<T> coder = input.getCoder();
-        PCollection<T> pCollection = input.apply(
-            MapElements.via(
-                new SimpleFunction<T, T>() {
-                    @Override
-                    public T apply(T input) {
-                        System.out.println(input);
-                        return input;
+        PCollection<TableRow> dataToWriteIntoBigQuery = dataWithAverageTemperature
+            .apply("Row to TableRow conversion", ParDo.of(
+                new DoFn<Row, TableRow>() {
+                    @ProcessElement
+                    public void pe(@Element Row row, OutputReceiver<TableRow> outputReceiver) {
+                        TableRow tableRow = BigQueryUtils.toTableRow(row);
+                        outputReceiver.output(tableRow);
                     }
                 }
-            )
-        ).setCoder(coder);
-        return pCollection;
+            ));
+
+        dataToWriteIntoBigQuery.apply("Write into BigQuery", BigQueryIO
+            .writeTableRows()
+            .to(String.format("%s:%s.%s", options.getProject(), options.getBigQueryDatasetName(), options.getBigQueryTableName()))
+            .withSchema(BigQueryUtils.toTableSchema(schema))
+            .withCreateDisposition(BigQueryIO.Write.CreateDisposition.CREATE_NEVER)
+            .withWriteDisposition(BigQueryIO.Write.WriteDisposition.WRITE_APPEND)
+        );
+
+        recreateBigQueryTable(options);
+        pipeline.run().waitUntilFinish();
+    }
+
+    private static void recreateBigQueryTable(PubSubBigQueryGCStorageOptions options) {
+        try {
+            com.google.cloud.bigquery.Schema bqSchema = com.google.cloud.bigquery.Schema.of(
+                Field.of(FIELD_NAME_UUID, StandardSQLTypeName.STRING),
+                Field.of(FIELD_NAME_TIMESTAMP, StandardSQLTypeName.STRING),
+                Field.of(FIELD_NAME_DEVICE, StandardSQLTypeName.STRING),
+                Field.of(FIELD_NAME_TEMPERATURE, StandardSQLTypeName.FLOAT64),
+                Field.of(FIELD_NAME_LOCATION, StandardSQLTypeName.STRING),
+                Field.of(FIELD_NAME_AVG_TEMPERATURE, StandardSQLTypeName.FLOAT64)
+            );
+
+            Table bqTable;
+            BigQuery bigQuery = BigQueryOptions.getDefaultInstance().getService();
+            TableId tableId = TableId.of(options.getProject(), options.getBigQueryDatasetName(), options.getBigQueryTableName());
+            bqTable = bigQuery.getTable(tableId);
+
+            LOGGER.info("Deleting table: [{}]", bqTable);
+            boolean deleted = bigQuery.delete(tableId);
+            Thread.sleep(1000);
+            LOGGER.info("{} BigQuery Table: [{}]", deleted ? "Deleted" : "Could not delete", options.getBigQueryTableName());
+
+            TableDefinition bqTableDefinition = StandardTableDefinition.of(bqSchema);
+            TableInfo bqTableInfo = TableInfo.of(tableId, bqTableDefinition);
+            bqTable = bigQuery.create(bqTableInfo);
+            LOGGER.info("Table is created. Waiting for the table to become available:\n[{}]", bqTable);
+            for (int i = 0; ; i++) {
+                LOGGER.info("Table is not available. Seconds passed: {}", i);
+                Thread.sleep(1000);
+                Table bqTable2 = bqTable.reload();
+                if (bqTable2 != null) {
+                    LOGGER.info("Table is available after [{}] seconds:\n[{}]", i, bqTable2);
+                    Thread.sleep(1000);
+                    break;
+                }
+            }
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
     }
 }
+

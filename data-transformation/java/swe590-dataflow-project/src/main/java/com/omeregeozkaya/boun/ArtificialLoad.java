@@ -20,7 +20,7 @@ class ArtificialLoad<T> extends PTransform<PCollection<T>, PCollection<T>> {
                 new SimpleFunction<T, T>() {
                     @Override
                     public T apply(T input) {
-                        long targetTime = System.currentTimeMillis() + 1000 * 10;
+                        long targetTime = System.currentTimeMillis() + 1000 * 60;
                         int x = 0;
                         while (System.currentTimeMillis() < targetTime) {
                             x = x + (x % 2 == 0 ? -1 : 1);

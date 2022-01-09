@@ -24,6 +24,8 @@ import com.google.api.services.bigquery.model.TableRow;
 import com.google.cloud.bigquery.BigQuery;
 import com.google.cloud.bigquery.BigQueryOptions;
 import com.google.cloud.bigquery.Field;
+import com.google.cloud.bigquery.FormatOptions;
+import com.google.cloud.bigquery.Job;
 import com.google.cloud.bigquery.StandardSQLTypeName;
 import com.google.cloud.bigquery.StandardTableDefinition;
 import com.google.cloud.bigquery.Table;
@@ -38,6 +40,8 @@ import org.apache.beam.sdk.io.gcp.bigquery.BigQueryHelpers;
 import org.apache.beam.sdk.io.gcp.bigquery.BigQueryIO;
 import org.apache.beam.sdk.io.gcp.bigquery.BigQueryServices;
 import org.apache.beam.sdk.io.gcp.bigquery.BigQueryUtils;
+import org.apache.beam.sdk.io.gcp.bigquery.InsertRetryPolicy;
+import org.apache.beam.sdk.io.gcp.pubsub.PubsubIO;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
 import org.apache.beam.sdk.schemas.Schema;
 import org.apache.beam.sdk.testing.TestStream;
@@ -106,19 +110,19 @@ public class PubSubToBigQueryIotDataPipeline {
 
         TestStream<String> createEvents = TestStream.create(StringUtf8Coder.of())
             .addElements(
-                TimestampedValue.of("{\"timestamp\": \"2021-01-13\", \"device\": \"swe590-sensor-1\", \"temperature\": 10}", Instant.now()),
-                TimestampedValue.of("{\"timestamp\": \"2021-01-14\", \"device\": \"swe590-sensor-1\", \"temperature\": 15}", Instant.now().plus(Duration.standardSeconds(10L))),
-                TimestampedValue.of("{\"timestamp\": \"2021-01-15\", \"device\": \"swe590-sensor-1\", \"temperature\": 20}", Instant.now().plus(Duration.standardSeconds(20L))),
-                TimestampedValue.of("{\"timestamp\": \"2021-01-16\", \"device\": \"swe590-sensor-1\", \"temperature\": 25}", Instant.now().plus(Duration.standardSeconds(30L))),
-                TimestampedValue.of("{\"timestamp\": \"2021-01-17\", \"device\": \"swe590-sensor-1\", \"temperature\": 30}", Instant.now().plus(Duration.standardSeconds(40L))),
-                TimestampedValue.of("{\"timestamp\": \"2021-01-18\", \"device\": \"swe590-sensor-1\", \"temperature\": 35}", Instant.now().plus(Duration.standardSeconds(50L))),
-                TimestampedValue.of("{\"timestamp\": \"2022-01-19\", \"device\": \"swe590-sensor-1\", \"temperature\": 40}", Instant.now().plus(Duration.standardSeconds(60L))),
-                TimestampedValue.of("{\"timestamp\": \"2022-01-20\", \"device\": \"swe590-sensor-1\", \"temperature\": 45}", Instant.now().plus(Duration.standardSeconds(70L))),
-                TimestampedValue.of("{\"timestamp\": \"2022-01-21\", \"device\": \"swe590-sensor-1\", \"temperature\": 50}", Instant.now().plus(Duration.standardSeconds(80L))),
-                TimestampedValue.of("{\"timestamp\": \"2022-01-22\", \"device\": \"swe590-sensor-1\", \"temperature\": 55}", Instant.now().plus(Duration.standardSeconds(90L))),
-                TimestampedValue.of("{\"timestamp\": \"2022-01-23\", \"device\": \"swe590-sensor-1\", \"temperature\": 60}", Instant.now().plus(Duration.standardSeconds(100L))),
-                TimestampedValue.of("{\"timestamp\": \"2022-01-24\", \"device\": \"swe590-sensor-1\", \"temperature\": 65}", Instant.now().plus(Duration.standardSeconds(110L))),
-                TimestampedValue.of("{\"timestamp\": \"2022-01-25\", \"device\": \"swe590-sensor-1\", \"temperature\": 70}", Instant.now().plus(Duration.standardSeconds(120L)))
+                TimestampedValue.of("{\"timestamp\": 20210113, \"device\": \"swe590-sensor-1\", \"temperature\": 10}", Instant.now()),
+                TimestampedValue.of("{\"timestamp\": 20210114, \"device\": \"swe590-sensor-1\", \"temperature\": 15}", Instant.now().plus(Duration.standardSeconds(10L))),
+                TimestampedValue.of("{\"timestamp\": 20210115, \"device\": \"swe590-sensor-1\", \"temperature\": 20}", Instant.now().plus(Duration.standardSeconds(20L))),
+                TimestampedValue.of("{\"timestamp\": 20210116, \"device\": \"swe590-sensor-1\", \"temperature\": 25}", Instant.now().plus(Duration.standardSeconds(30L))),
+                TimestampedValue.of("{\"timestamp\": 20210117, \"device\": \"swe590-sensor-1\", \"temperature\": 30}", Instant.now().plus(Duration.standardSeconds(40L))),
+                TimestampedValue.of("{\"timestamp\": 20210118, \"device\": \"swe590-sensor-1\", \"temperature\": 35}", Instant.now().plus(Duration.standardSeconds(50L))),
+                TimestampedValue.of("{\"timestamp\": 20220119, \"device\": \"swe590-sensor-1\", \"temperature\": 40}", Instant.now().plus(Duration.standardSeconds(60L))),
+                TimestampedValue.of("{\"timestamp\": 20220120, \"device\": \"swe590-sensor-1\", \"temperature\": 45}", Instant.now().plus(Duration.standardSeconds(70L))),
+                TimestampedValue.of("{\"timestamp\": 20220121, \"device\": \"swe590-sensor-1\", \"temperature\": 50}", Instant.now().plus(Duration.standardSeconds(80L))),
+                TimestampedValue.of("{\"timestamp\": 20220122, \"device\": \"swe590-sensor-1\", \"temperature\": 55}", Instant.now().plus(Duration.standardSeconds(90L))),
+                TimestampedValue.of("{\"timestamp\": 20220123, \"device\": \"swe590-sensor-1\", \"temperature\": 60}", Instant.now().plus(Duration.standardSeconds(100L))),
+                TimestampedValue.of("{\"timestamp\": 20220124, \"device\": \"swe590-sensor-1\", \"temperature\": 65}", Instant.now().plus(Duration.standardSeconds(110L))),
+                TimestampedValue.of("{\"timestamp\": 20220125, \"device\": \"swe590-sensor-1\", \"temperature\": 70}", Instant.now().plus(Duration.standardSeconds(120L)))
             ).advanceWatermarkToInfinity();
 
         final List<KV<String, String>> testLookUpData = Arrays.asList(
@@ -127,22 +131,21 @@ public class PubSubToBigQueryIotDataPipeline {
         );
         PCollection<KV<String, String>> lookUpData = pipeline
             .apply("Creation of lookup data", Create.of(testLookUpData));
-
         PCollectionView<Map<String, String>> lookUpDataView = lookUpData
             .apply(View.asMap());
 
         Schema schema = Schema.builder()
             .addNullableField(FIELD_NAME_UUID, Schema.FieldType.STRING)
-            .addStringField(FIELD_NAME_TIMESTAMP)
+            .addInt64Field(FIELD_NAME_TIMESTAMP)
             .addStringField(FIELD_NAME_DEVICE)
             .addDoubleField(FIELD_NAME_TEMPERATURE)
             .addNullableField(FIELD_NAME_LOCATION, Schema.FieldType.STRING)
             .addNullableField(FIELD_NAME_AVG_TEMPERATURE, Schema.FieldType.DOUBLE)
             .build();
 
-
         PCollection<Row> jsonMessages = pipeline
-            .apply("Ingest events", createEvents)
+//            .apply("Ingest events", createEvents)
+            .apply("Read PubSub Messages", PubsubIO.readStrings().fromTopic(options.getInputTopic()))
             .apply("Convert JSON string into to Row object", JsonToRow.withSchema(schema));
 
         PCollection<KV<String, Row>> enrichedData = jsonMessages
@@ -213,11 +216,12 @@ public class PubSubToBigQueryIotDataPipeline {
             .writeTableRows()
             .to(String.format("%s:%s.%s", options.getProject(), options.getBigQueryDatasetName(), options.getBigQueryTableName()))
             .withSchema(BigQueryUtils.toTableSchema(schema))
-            .withCreateDisposition(BigQueryIO.Write.CreateDisposition.CREATE_NEVER)
+            .withCreateDisposition(BigQueryIO.Write.CreateDisposition.CREATE_IF_NEEDED)
             .withWriteDisposition(BigQueryIO.Write.WriteDisposition.WRITE_APPEND)
+            .withFailedInsertRetryPolicy(InsertRetryPolicy.alwaysRetry())
+            .optimizedWrites()
         );
 
-        recreateBigQueryTable(options);
         pipeline.run().waitUntilFinish();
     }
 
@@ -239,7 +243,6 @@ public class PubSubToBigQueryIotDataPipeline {
 
             LOGGER.info("Deleting table: [{}]", bqTable);
             boolean deleted = bigQuery.delete(tableId);
-            Thread.sleep(1000);
             LOGGER.info("{} BigQuery Table: [{}]", deleted ? "Deleted" : "Could not delete", options.getBigQueryTableName());
 
             TableDefinition bqTableDefinition = StandardTableDefinition.of(bqSchema);
@@ -252,7 +255,7 @@ public class PubSubToBigQueryIotDataPipeline {
                 Table bqTable2 = bqTable.reload();
                 if (bqTable2 != null) {
                     LOGGER.info("Table is available after [{}] seconds:\n[{}]", i, bqTable2);
-                    Thread.sleep(1000);
+                    Thread.sleep(30000);
                     break;
                 }
             }

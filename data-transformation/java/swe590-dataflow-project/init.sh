@@ -18,7 +18,7 @@ function deploy-dataflow-pipeline() {
     --runner=DataflowRunner \
     --windowSize=10 \
     --workerMachineType=n1-standard-1 \
-    --maxNumWorkers=10 \
+    --maxNumWorkers=5 \
     --numWorkers=1 \
     --autoscalingAlgorithm=THROUGHPUT_BASED \
     --bigQueryDatasetName=$BIGQUERY_DATASET_NAME \
@@ -38,7 +38,7 @@ function test-dataflow-pipeline() {
     --runner=DirectRunner \
     --windowSize=10 \
     --workerMachineType=n1-standard-1 \
-    --maxNumWorkers=10 \
+    --maxNumWorkers=5 \
     --numWorkers=1 \
     --autoscalingAlgorithm=THROUGHPUT_BASED \
     --bigQueryDatasetName=$BIGQUERY_DATASET_NAME \

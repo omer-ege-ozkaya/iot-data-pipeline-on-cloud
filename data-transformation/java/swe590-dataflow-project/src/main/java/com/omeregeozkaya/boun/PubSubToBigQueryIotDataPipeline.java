@@ -146,6 +146,7 @@ public class PubSubToBigQueryIotDataPipeline {
         PCollection<Row> jsonMessages = pipeline
 //            .apply("Ingest events", createEvents)
             .apply("Read PubSub Messages", PubsubIO.readStrings().fromTopic(options.getInputTopic()))
+            .apply("Artificial load", ArtificialLoad.create())
             .apply("Convert JSON string into to Row object", JsonToRow.withSchema(schema));
 
         PCollection<KV<String, Row>> enrichedData = jsonMessages
